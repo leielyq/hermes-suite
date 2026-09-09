@@ -4,6 +4,25 @@ on:
   push:
     tags:
       - 'v*'
+  schedule:
+    # Daily at 02:17 UTC (10:17 Beijing time). Off-peak minute to reduce
+    # GitHub cron congestion delays.
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Rebuild even if versions are unchanged'
+        type: boolean
+        default: false
+
+# Serialize builds so a scheduled run queues behind a manual run instead of
+# racing it to push the "latest" image tag.
+concurrency:
+  group: docker-build
+  cancel-in-progress: false
+
+permissions:
+  contents: write
 
 env:
   REGISTRY: docker.io
@@ -12,47 +31,98 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Parse version from tag
+      - name: Resolve versions
         id: versions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE: ${{ inputs.force }}
         run: |
-          # Tag format: v2026.4.30-0.50.278
-          TAG="${GITHUB_REF_NAME}"
-          # Strip leading 'v' for Docker tag
-          DOCKER_TAG="${TAG#v}"
-          echo "docker_tag=${DOCKER_TAG}" >> "$GITHUB_OUTPUT"
+          SKIP=false
+          UPDATED=false
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            # Manual tag build. Tag format: v2026.4.30-0.50.278
+            TAG="${GITHUB_REF_NAME}"
+            DOCKER_TAG="${TAG#v}"
+            AGENT_VER="v${DOCKER_TAG%-*}"
+            WEBUI_VER="v${DOCKER_TAG##*-}"
+          else
+            # Scheduled / manual run: resolve latest upstream versions and
+            # compare with the pins in versions.env.
+            AGENT_VER=$(gh api repos/NousResearch/hermes-agent/releases/latest --jq .tag_name)
+            WEBUI_VER=$(gh api "repos/nesquena/hermes-webui/tags?per_page=1" --jq '.[0].name')
+            CUR_AGENT=$(grep '^AGENT_VERSION=' versions.env | cut -d= -f2)
+            CUR_WEBUI=$(grep '^WEBUI_VERSION=' versions.env | cut -d= -f2)
+            echo "Upstream: agent=${AGENT_VER} webui=${WEBUI_VER}"
+            echo "Pinned:   agent=${CUR_AGENT} webui=${CUR_WEBUI}"
 
-          # Extract agent and webui versions from the compound tag
-          # 2026.4.30-0.50.278 -> agent=2026.4.30, webui=0.50.278
-          AGENT_VER="${DOCKER_TAG%-*}"
-          WEBUI_VER="${DOCKER_TAG##*-}"
-          echo "agent_version=v${AGENT_VER}" >> "$GITHUB_OUTPUT"
-          echo "webui_version=v${WEBUI_VER}" >> "$GITHUB_OUTPUT"
+            if [ "$AGENT_VER" = "$CUR_AGENT" ] && [ "$WEBUI_VER" = "$CUR_WEBUI" ] && [ "$FORCE" != "true" ]; then
+              SKIP=true
+              echo "Versions unchanged - nothing to build."
+            else
+              DOCKER_TAG="${AGENT_VER#v}-${WEBUI_VER#v}"
+              sed -i "s/^AGENT_VERSION=.*/AGENT_VERSION=${AGENT_VER}/" versions.env
+              sed -i "s/^WEBUI_VERSION=.*/WEBUI_VERSION=${WEBUI_VER}/" versions.env
+              UPDATED=true
+            fi
+          fi
 
-          echo "Suite tag:     ${DOCKER_TAG}"
-          echo "Agent version: v${AGENT_VER}"
-          echo "WebUI version: v${WEBUI_VER}"
+          if [ "$SKIP" != "true" ]; then
+            {
+              echo "docker_tag=${DOCKER_TAG}"
+              echo "agent_version=${AGENT_VER}"
+              echo "webui_version=${WEBUI_VER}"
+              echo "updated=${UPDATED}"
+            } >> "$GITHUB_OUTPUT"
+            echo "Suite tag: ${DOCKER_TAG} | agent: ${AGENT_VER} | webui: ${WEBUI_VER} | updated: ${UPDATED}"
+          else
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit versions.env and tag
+        if: steps.versions.outputs.updated == 'true'
+        env:
+          DOCKER_TAG: ${{ steps.versions.outputs.docker_tag }}
+          AGENT_VERSION: ${{ steps.versions.outputs.agent_version }}
+          WEBUI_VERSION: ${{ steps.versions.outputs.webui_version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          TAG="v${DOCKER_TAG}"
+          if git diff --quiet; then
+            echo "versions.env unchanged - no commit needed"
+          else
+            git add versions.env
+            git commit -m "Auto-bump: agent ${AGENT_VERSION}, webui ${WEBUI_VERSION}"
+            git push origin main
+          fi
+          if [ -n "$(git ls-remote --tags origin "refs/tags/${TAG}")" ]; then
+            echo "Tag ${TAG} already exists on remote - skipping"
+          else
+            git tag "${TAG}"
+            git push origin "${TAG}"
+          fi
 
       - name: Set up QEMU
+        if: steps.versions.outputs.skip != 'true'
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
+        if: steps.versions.outputs.skip != 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Login to Docker Hub
+        if: steps.versions.outputs.skip != 'true'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push
+        if: steps.versions.outputs.skip != 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
