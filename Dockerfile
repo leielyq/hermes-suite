@@ -75,6 +75,11 @@ COPY supervisord.conf /etc/supervisor/supervisord.conf
 COPY start.sh /opt/hermes-suite/start.sh
 RUN chmod +x /opt/hermes-suite/start.sh
 
+# Custom services: supervisord.conf [include]s /etc/supervisor/conf.d/*.conf.
+# Create the directory so the include stays valid even without the volume
+# mounted (docker-compose.yaml mounts ./supervisor.d here at runtime).
+RUN mkdir -p /etc/supervisor/conf.d
+
 # ---------------------------------------------------------------------------
 # Patch: disable dashboard auto-sso — the upstream middleware auto-redirects
 # to /auth/login (OAuth start) when a single provider is registered, but

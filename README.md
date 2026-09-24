@@ -231,6 +231,54 @@ podman exec hermes-suite supervisorctl status
 
 ## Customization
 
+### Custom services (persistent supervisord programs)
+
+The image's supervisord config `[include]`s `/etc/supervisor/conf.d/*.conf`, and
+`docker-compose.yaml` mounts `./supervisor.d` from the host into that directory.
+To add your own long-running services, drop one `[program:x]` block per file
+into `supervisor.d/`:
+
+```
+supervisor.d/
+  panwatch.conf
+  rsshub.conf
+```
+
+Example (`supervisor.d/myapp.conf`) — see `supervisor.d/README.md` for details:
+
+```ini
+[program:myapp]
+command=/opt/data/apps/myapp/run.sh
+directory=/opt/data/apps/myapp
+user=hermes
+autostart=true
+autorestart=true
+priority=40
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
+```
+
+Apply changes without restarting the container:
+
+```bash
+docker exec hermes-suite supervisorctl reread
+docker exec hermes-suite supervisorctl update
+```
+
+> **Why this mechanism exists — do not edit `/etc/supervisor/supervisord.conf`
+> inside a running container.** That file lives in the container's writable
+> layer. A plain `docker restart` / `podman restart` keeps the layer, but any
+> container **recreation** — pulling a new image, changing compose config, or
+> `down` + `up` — discards the writable layer entirely, and `/etc` falls back
+> to the image default. Custom services added that way silently vanish.
+>
+> Only mounted volumes survive recreation: `~/.hermes` (`/opt/data`),
+> `~/workspace` (`/workspace`), and `./supervisor.d` (`/etc/supervisor/conf.d`).
+> Install custom service **code** under `/opt/data/...` or `/workspace/...`
+> too — code installed inside the container filesystem is lost the same way.
+
 ### Changing component versions
 
 Edit `versions.env` to change the pinned versions and runtime settings:
@@ -395,7 +443,8 @@ The Dockerfile performs these steps:
 hermes-suite/
   Dockerfile           — Build definition (parameterized AGENT_VERSION)
   versions.env         — Pinned component versions for current release
-  supervisord.conf     — Process manager config (2 services)
+  supervisord.conf     — Process manager config (2 services + conf.d include)
+  supervisor.d/        — Custom service blocks (host-mounted into the container)
   start.sh             — Container entrypoint (UID setup + launch)
   docker-compose.yaml  — Podman/Docker Compose configuration
   build.sh             — Build helper script (reads versions.env)
