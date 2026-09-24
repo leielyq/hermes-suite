@@ -44,7 +44,7 @@ setup_hermes() {
     source "${INSTALL_DIR}/.venv/bin/activate"
 
     # Create essential directory structure (mirrors official entrypoint)
-    mkdir -p "$HERMES_HOME"/{cron,sessions,logs,hooks,memories,skills,skins,plans,workspace,home,webui,cache}
+    mkdir -p "$HERMES_HOME"/{cron,sessions,logs,hooks,memories,skills,skins,plans,workspace,home,cache}
 
     # .env — only create if missing (newer agent images may not ship .env.example)
     if [ ! -f "$HERMES_HOME/.env" ] && [ -f "$INSTALL_DIR/.env.example" ]; then
@@ -96,7 +96,6 @@ print_banner() {
     echo "=========================================="
     echo " Gateway:    http://0.0.0.0:8642"
     echo " Dashboard:  http://0.0.0.0:9119"
-    echo " WebUI:      http://0.0.0.0:8787"
     echo "=========================================="
     echo " Dashboard login: $HERMES_DASHBOARD_BASIC_AUTH_USERNAME / $HERMES_DASHBOARD_BASIC_AUTH_PASSWORD"
     echo "=========================================="

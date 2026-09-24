@@ -1,16 +1,15 @@
 # =============================================================================
 # Hermes Suite — All-in-One Container Image
-# Combines: hermes-agent + hermes-webui + hermes-dashboard
+# Combines: hermes-agent + hermes-dashboard
 #
 # Solves Podman v3.4.4 UID/GID sharing limitation between multiple containers
-# by running all three services in a single container under one user.
+# by running both services in a single container under one user.
 #
 # Services:
 #   hermes-gateway   — Agent gateway on port 8642 (CLI, Telegram, cron, tools)
 #   hermes-dashboard — Built-in monitoring dashboard on port 9119
-#   hermes-webui     — Browser chat interface on port 8787
 #
-# Build:  podman build -t hermes-suite:2026.7.20-0.52.106 .
+# Build:  podman build -t hermes-suite:2026.9.21 .
 # Run:    podman-compose up -d
 # =============================================================================
 
@@ -70,33 +69,7 @@ RUN mkdir -p /var/log/supervisor /var/run/supervisor && \
     chown -R hermes:hermes /var/log/supervisor /var/run/supervisor
 
 # ---------------------------------------------------------------------------
-# Stage 5: Install hermes-webui
-# The webui is a Python web server (server.py). We clone it from GitHub
-# and set up its own venv using uv (avoids python3-venv package requirement).
-# The webui needs the agent's Python deps to import agent modules.
-# We install with the same extras the base image bakes into /opt/hermes/.venv
-# (all, messaging, anthropic, bedrock, azure-identity, hindsight) so the
-# webui's in-process agent has working memory and provider backends (#16).
-#
-# PIN to a specific tag for reproducible builds — never use 'master'.
-# ---------------------------------------------------------------------------
-ARG HERMES_WEBUI_VERSION=v0.52.106
-RUN cd /opt && \
-    git clone --depth 1 --branch ${HERMES_WEBUI_VERSION} \
-        https://github.com/nesquena/hermes-webui.git hermes-webui && \
-    uv venv /opt/hermes-webui/venv && \
-    uv pip install --python /opt/hermes-webui/venv/bin/python3 --no-cache-dir -r /opt/hermes-webui/requirements.txt && \
-    uv pip install --python /opt/hermes-webui/venv/bin/python3 --no-cache-dir -e "/opt/hermes[all,messaging,anthropic,bedrock,azure-identity,hindsight]" && \
-    rm -rf /opt/hermes-webui/.git
-
-# Bake version tag into the webui
-RUN echo "__version__ = '${HERMES_WEBUI_VERSION}'" > /opt/hermes-webui/api/_version.py
-
-# Ensure venv is owned by hermes so runtime lazy-dep auto-install works (#6).
-RUN chown -R hermes:hermes /opt/hermes-webui/venv
-
-# ---------------------------------------------------------------------------
-# Stage 6: Set up supervisord config and startup script
+# Stage 5: Set up supervisord config and startup script
 # ---------------------------------------------------------------------------
 COPY supervisord.conf /etc/supervisor/supervisord.conf
 COPY start.sh /opt/hermes-suite/start.sh
@@ -111,21 +84,19 @@ RUN chmod +x /opt/hermes-suite/start.sh
 RUN sed -i 's/auto = _auto_sso_response(request)/auto = None  # disabled: BasicAuthProvider has no OAuth start flow/'     /opt/hermes/hermes_cli/dashboard_auth/middleware.py
 
 # ---------------------------------------------------------------------------
-# Stage 7: Environment, labels, and runtime config
+# Stage 6: Environment, labels, and runtime config
 # ---------------------------------------------------------------------------
 # Re-declare ARGs after FROM so they are available in LABEL
 ARG AGENT_VERSION=v2026.7.20
 ARG ENABLE_WHATSAPP_BRIDGE=false
-ARG HERMES_WEBUI_VERSION=v0.52.106
 
 LABEL org.opencontainers.image.title="Hermes Suite" \
-      org.opencontainers.image.description="All-in-one: hermes-agent + hermes-webui + hermes-dashboard" \
+      org.opencontainers.image.description="All-in-one: hermes-agent + hermes-dashboard" \
       org.opencontainers.image.source="https://github.com/sunnysktsang/hermes-suite" \
       org.opencontainers.image.vendor="sunnysktsang" \
-      hermes-suite.agent-version="${AGENT_VERSION}" \
-      hermes-suite.webui-version="${HERMES_WEBUI_VERSION}"
+      hermes-suite.agent-version="${AGENT_VERSION}"
 
-ENV PATH="/opt/hermes/.venv/bin:/opt/hermes-webui/venv/bin:$PATH"
+ENV PATH="/opt/hermes/.venv/bin:$PATH"
 ENV HERMES_HOME=/opt/data
 ENV HERMES_DATA_DIR=/opt/data
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/hermes/.playwright
@@ -133,15 +104,8 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/opt/hermes/.playwright
 # hermes-agent web dist (built into the base image)
 ENV HERMES_WEB_DIST=/opt/hermes/hermes_cli/web_dist
 
-# hermes-webui settings
-ENV HERMES_WEBUI_HOST=0.0.0.0
-ENV HERMES_WEBUI_PORT=8787
-ENV HERMES_WEBUI_STATE_DIR=/opt/data/webui
-ENV HERMES_WEBUI_DEFAULT_WORKSPACE=/workspace
-ENV HERMES_WEBUI_AGENT_DIR=/opt/hermes
-
 # Expose all service ports
-EXPOSE 8642 8787 9119
+EXPOSE 8642 9119
 
 # Workspace directory
 RUN mkdir -p /workspace

@@ -3,7 +3,7 @@
 # build.sh — Build the Hermes Suite container image
 #
 # Reads pinned versions from versions.env by default.
-# Override with: ./build.sh --agent v2026.7.20 --webui v0.52.106
+# Override with: ./build.sh --agent v2026.9.21
 #
 # CONTAINER_RUNTIME (from versions.env or CLI flag):
 #   auto         — detect podman first, fall back to docker (default)
@@ -28,7 +28,7 @@ BUILD_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # --- Load pinned versions and runtime from versions.env ---
 if [ -f "${BUILD_DIR}/versions.env" ]; then
-    eval "$(grep -E '^(AGENT_VERSION|WEBUI_VERSION|CONTAINER_RUNTIME|USE_SUDO|ENABLE_WHATSAPP_BRIDGE)=' "${BUILD_DIR}/versions.env")"
+    eval "$(grep -E '^(AGENT_VERSION|CONTAINER_RUNTIME|USE_SUDO|ENABLE_WHATSAPP_BRIDGE)=' "${BUILD_DIR}/versions.env")"
 else
     echo "ERROR: versions.env not found in ${BUILD_DIR}"
     exit 1
@@ -39,8 +39,6 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         --agent)
             AGENT_VERSION="$2"; shift 2 ;;
-        --webui)
-            WEBUI_VERSION="$2"; shift 2 ;;
         --podman)
             CONTAINER_RUNTIME="podman"; shift ;;
         --docker)
@@ -97,10 +95,9 @@ if [ "$USE_SUDO" = "true" ]; then
     SUDO_PREFIX="sudo"
 fi
 
-# Strip 'v' prefix for the compound tag (Docker convention: no 'v')
+# Strip 'v' prefix for the image tag (Docker convention: no 'v')
 AGENT_VER_CLEAN="${AGENT_VERSION#v}"
-WEBUI_VER_CLEAN="${WEBUI_VERSION#v}"
-IMAGE_TAG="ascensionoid/hermes-suite:${AGENT_VER_CLEAN}-${WEBUI_VER_CLEAN}"
+IMAGE_TAG="leiel/hermes-suite:${AGENT_VER_CLEAN}"
 
 # --- Patch supervisord.conf for docker-nolog mode ---
 if [ "$BUILD_MODE" = "docker-nolog" ]; then
@@ -115,7 +112,6 @@ echo "=========================================="
 echo " Building Hermes Suite"
 echo "=========================================="
 echo " Agent version:  ${AGENT_VERSION}"
-echo " WebUI version:  ${WEBUI_VERSION}"
 echo " Image tag:      ${IMAGE_TAG}"
 echo " Runtime:        ${CONTAINER_RUNTIME}"
 echo " Sudo:           ${USE_SUDO}"
@@ -127,7 +123,6 @@ echo "=========================================="
 if [ "$BUILD_CMD" = "podman" ]; then
     $SUDO_PREFIX podman build \
         --build-arg AGENT_VERSION="${AGENT_VERSION}" \
-        --build-arg HERMES_WEBUI_VERSION="${WEBUI_VERSION}" \
         --build-arg ENABLE_WHATSAPP_BRIDGE="${ENABLE_WHATSAPP_BRIDGE}" \
         -t "${IMAGE_TAG}" \
         --format docker \
@@ -135,7 +130,6 @@ if [ "$BUILD_CMD" = "podman" ]; then
 else
     $SUDO_PREFIX docker build \
         --build-arg AGENT_VERSION="${AGENT_VERSION}" \
-        --build-arg HERMES_WEBUI_VERSION="${WEBUI_VERSION}" \
         --build-arg ENABLE_WHATSAPP_BRIDGE="${ENABLE_WHATSAPP_BRIDGE}" \
         -t "${IMAGE_TAG}" \
         "${BUILD_DIR}"
@@ -166,5 +160,5 @@ else
     echo "   ${SUDO_PREFIX} docker run --rm -it \\"
 fi
 echo "     -v ~/.hermes:/opt/data:Z \\"
-echo "     -p 8642:8642 -p 8787:8787 -p 9119:9119 \\"
+echo "     -p 8642:8642 -p 9119:9119 \\"
 echo "     ${IMAGE_TAG}"

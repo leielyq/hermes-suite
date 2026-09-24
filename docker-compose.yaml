@@ -17,7 +17,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ascensionoid/hermes-suite:${HERMES_SUITE_IMAGE_TAG}
+    image: leiel/hermes-suite:${HERMES_SUITE_IMAGE_TAG}
     container_name: hermes-suite
     networks:
       agent_net:
@@ -25,8 +25,6 @@ services:
     ports:
       # Gateway (CLI, Telegram, webhook)
       - "8642:8642"
-      # WebUI (browser chat interface)
-      - "8787:8787"
       # Dashboard (monitoring/analytics)
       - "9119:9119"
     volumes:
@@ -41,7 +39,7 @@ services:
       - HERMES_HOME=/opt/data
       - HERMES_DATA_DIR=/opt/data
       - DASHBOARD_CREDENTIAL=${DASHBOARD_CREDENTIAL:-admin:admin}
-      - PATH=/opt/hermes/.venv/bin:/opt/hermes-webui/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      - PATH=/opt/hermes/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     restart: unless-stopped
     deploy:
       resources:

@@ -44,28 +44,24 @@ jobs:
           SKIP=false
           UPDATED=false
           if [ "$GITHUB_EVENT_NAME" = "push" ]; then
-            # Manual tag build. Tag format: v2026.4.30-0.50.278
+            # Manual tag build. Tag format: v2026.9.21
             TAG="${GITHUB_REF_NAME}"
             DOCKER_TAG="${TAG#v}"
-            AGENT_VER="v${DOCKER_TAG%-*}"
-            WEBUI_VER="v${DOCKER_TAG##*-}"
+            AGENT_VER="v${DOCKER_TAG}"
           else
-            # Scheduled / manual run: resolve latest upstream versions and
-            # compare with the pins in versions.env.
+            # Scheduled / manual run: resolve the latest upstream agent
+            # version and compare with the pin in versions.env.
             AGENT_VER=$(gh api repos/NousResearch/hermes-agent/releases/latest --jq .tag_name)
-            WEBUI_VER=$(gh api "repos/nesquena/hermes-webui/tags?per_page=1" --jq '.[0].name')
             CUR_AGENT=$(grep '^AGENT_VERSION=' versions.env | cut -d= -f2)
-            CUR_WEBUI=$(grep '^WEBUI_VERSION=' versions.env | cut -d= -f2)
-            echo "Upstream: agent=${AGENT_VER} webui=${WEBUI_VER}"
-            echo "Pinned:   agent=${CUR_AGENT} webui=${CUR_WEBUI}"
+            echo "Upstream: agent=${AGENT_VER}"
+            echo "Pinned:   agent=${CUR_AGENT}"
 
-            if [ "$AGENT_VER" = "$CUR_AGENT" ] && [ "$WEBUI_VER" = "$CUR_WEBUI" ] && [ "$FORCE" != "true" ]; then
+            if [ "$AGENT_VER" = "$CUR_AGENT" ] && [ "$FORCE" != "true" ]; then
               SKIP=true
               echo "Versions unchanged - nothing to build."
             else
-              DOCKER_TAG="${AGENT_VER#v}-${WEBUI_VER#v}"
+              DOCKER_TAG="${AGENT_VER#v}"
               sed -i "s/^AGENT_VERSION=.*/AGENT_VERSION=${AGENT_VER}/" versions.env
-              sed -i "s/^WEBUI_VERSION=.*/WEBUI_VERSION=${WEBUI_VER}/" versions.env
               UPDATED=true
             fi
           fi
@@ -74,10 +70,9 @@ jobs:
             {
               echo "docker_tag=${DOCKER_TAG}"
               echo "agent_version=${AGENT_VER}"
-              echo "webui_version=${WEBUI_VER}"
               echo "updated=${UPDATED}"
             } >> "$GITHUB_OUTPUT"
-            echo "Suite tag: ${DOCKER_TAG} | agent: ${AGENT_VER} | webui: ${WEBUI_VER} | updated: ${UPDATED}"
+            echo "Suite tag: ${DOCKER_TAG} | agent: ${AGENT_VER} | updated: ${UPDATED}"
           else
             echo "skip=true" >> "$GITHUB_OUTPUT"
           fi
@@ -87,7 +82,6 @@ jobs:
         env:
           DOCKER_TAG: ${{ steps.versions.outputs.docker_tag }}
           AGENT_VERSION: ${{ steps.versions.outputs.agent_version }}
-          WEBUI_VERSION: ${{ steps.versions.outputs.webui_version }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -96,7 +90,7 @@ jobs:
             echo "versions.env unchanged - no commit needed"
           else
             git add versions.env
-            git commit -m "Auto-bump: agent ${AGENT_VERSION}, webui ${WEBUI_VERSION}"
+            git commit -m "Auto-bump: agent ${AGENT_VERSION}"
             git push origin main
           fi
           if [ -n "$(git ls-remote --tags origin "refs/tags/${TAG}")" ]; then
@@ -130,7 +124,6 @@ jobs:
           push: true
           build-args: |
             AGENT_VERSION=${{ steps.versions.outputs.agent_version }}
-            HERMES_WEBUI_VERSION=${{ steps.versions.outputs.webui_version }}
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.versions.outputs.docker_tag }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest

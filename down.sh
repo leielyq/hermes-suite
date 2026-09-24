@@ -9,7 +9,7 @@ COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yaml"
 
 # --- Load config from versions.env ---
 if [ -f "${SCRIPT_DIR}/versions.env" ]; then
-    eval "$(grep -E '^(AGENT_VERSION|WEBUI_VERSION|CONTAINER_RUNTIME|USE_SUDO)=' "${SCRIPT_DIR}/versions.env")"
+    eval "$(grep -E '^(AGENT_VERSION|CONTAINER_RUNTIME|USE_SUDO)=' "${SCRIPT_DIR}/versions.env")"
 fi
 CONTAINER_RUNTIME="${CONTAINER_RUNTIME:-auto}"
 USE_SUDO="${USE_SUDO:-false}"
@@ -34,8 +34,7 @@ fi
 
 # --- Derive image tag from versions.env ---
 AGENT_VER_CLEAN="${AGENT_VERSION#v}"
-WEBUI_VER_CLEAN="${WEBUI_VERSION#v}"
-export HERMES_SUITE_IMAGE_TAG="${AGENT_VER_CLEAN}-${WEBUI_VER_CLEAN}"
+export HERMES_SUITE_IMAGE_TAG="${AGENT_VER_CLEAN}"
 
 # For sudo: compose needs explicit env passthrough
 if [ "$USE_SUDO" = "true" ]; then
