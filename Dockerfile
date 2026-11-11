@@ -1,5 +1,21 @@
 # =============================================================================
 # Hermes Suite — All-in-One Container Image
+#
+# ⚠ 警示记录 (2026-11-11)
+# 现象: 2026-10-15 起 CI 对 hermes-agent v0.22.1+ 的自动构建连续失败
+#       (exit 1 at `npm install`, ~2min/run), v0.22.1→v0.23.1 共 8 个版本
+#       未能发布镜像; Docker Hub 最后成功镜像停在 2026.9.24。
+# 根因: 上游 v0.x 重构 — ① package.json 增加 preinstall 守卫, 拒绝 npm,
+#       要求 pnpm (pm/lock.json); ② 基础镜像改由 pm 预置 Chromium 于
+#       /opt/hermes/tools (PLAYWRIGHT_BROWSERS_PATH 由基础镜像声明),
+#       不再需要 `npx playwright install`; ③ pm-pinned uv 不再暴露到
+#       PATH, 下游镜像不可直接调用 uv。
+# 修复: Stage 3 仅保留 whatsapp-bridge 移除; Stage 4 改用系统 python3
+#       `python3 -m venv` 安装 supervisord; Stage 6 不再覆盖
+#       PLAYWRIGHT_BROWSERS_PATH。验证: commit "Fix build against
+#       hermes-agent v0.x (pnpm guard, pm-staged chromium, no uv)"
+#       构建绿灯 + docker exec hermes-suite supervisorctl status 全 RUNNING。
+#
 # Combines: hermes-agent + hermes-dashboard
 #
 # Solves Podman v3.4.4 UID/GID sharing limitation between multiple containers
@@ -44,24 +60,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN echo "hermes ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 # ---------------------------------------------------------------------------
-# Stage 3: Install Browser tool dependencies for agent
-# npm install + Playwright chromium (needed by browser toolset)
+# Stage 3: WhatsApp bridge removal
+# Since hermes-agent v0.x the base image ships node deps and a pm-pinned
+# Chromium under /opt/hermes/tools (with its shared libs), so no npm install
+# or playwright download is needed here — upstream's package.json now rejects
+# plain `npm install` in favor of pnpm anyway (pm/lock.json).
 # WhatsApp bridge is removed by default (ENABLE_WHATSAPP_BRIDGE=false).
 # Set --build-arg ENABLE_WHATSAPP_BRIDGE=true or use --whatsapp flag in
-# build.sh to include it.
+# build.sh to keep it.
 # ---------------------------------------------------------------------------
-RUN cd /opt/hermes && \
-    npm install --prefer-offline --no-audit && \
-    npx playwright install --with-deps chromium && \
-    if [ "$ENABLE_WHATSAPP_BRIDGE" != "true" ]; then rm -rf /opt/hermes/scripts/whatsapp-bridge; fi && \
-    rm -rf /var/lib/apt/lists/*
+RUN if [ "$ENABLE_WHATSAPP_BRIDGE" != "true" ]; then rm -rf /opt/hermes/scripts/whatsapp-bridge; fi
 
 # ---------------------------------------------------------------------------
-# Stage 4: Install supervisord via uv (not available in Debian Trixie apt)
-# We install it into a dedicated venv at /opt/supervisor.
+# Stage 4: Install supervisord (not available in Debian Trixie apt)
+# The base image's uv is pm-pinned and deliberately not exposed on PATH
+# ("build consumers receive Python environments, never an installer"), so
+# we build a dedicated venv with the system python3's stdlib venv+pip.
 # ---------------------------------------------------------------------------
-RUN uv venv /opt/supervisor && \
-    uv pip install --python /opt/supervisor/bin/python3 supervisor && \
+RUN python3 -m venv /opt/supervisor && \
+    /opt/supervisor/bin/pip install --no-cache-dir supervisor && \
     ln -sf /opt/supervisor/bin/supervisord /usr/local/bin/supervisord && \
     ln -sf /opt/supervisor/bin/supervisorctl /usr/local/bin/supervisorctl
 
@@ -104,7 +121,8 @@ LABEL org.opencontainers.image.title="Hermes Suite" \
 ENV PATH="/opt/hermes/.venv/bin:$PATH"
 ENV HERMES_HOME=/opt/data
 ENV HERMES_DATA_DIR=/opt/data
-ENV PLAYWRIGHT_BROWSERS_PATH=/opt/hermes/.playwright
+# PLAYWRIGHT_BROWSERS_PATH is intentionally NOT overridden: the v0.x base
+# image points it at the pm-pinned Chromium store (/opt/hermes/tools).
 
 # hermes-agent web dist (built into the base image)
 ENV HERMES_WEB_DIST=/opt/hermes/hermes_cli/web_dist
